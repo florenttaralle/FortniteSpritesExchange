@@ -20,7 +20,6 @@ import time
 from typing import Any
 from urllib.parse import urljoin
 
-import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 
