@@ -1,48 +1,109 @@
 # Sprite Exchange
 
-Sprite Exchange is a small FastAPI web application for organizing Fortnite.GG sprite exchanges between players.
+Sprite Exchange is a single-file FastAPI application for comparing Fortnite.GG sprite collections and preparing exchanges between players.
 
-The project intentionally fits in a **single Python file**: the FastAPI backend, HTML, CSS, JavaScript, data parser, local persistence logic, and exchange-generation algorithm are all bundled in `sprite_exchange_app_v8.py`.
+The backend, HTML, CSS, JavaScript, Fortnite.GG parser, local persistence, exchange optimizer, matrix view, and sprite grids are all contained in one Python file: `app.py`.
 
 ## Features
 
-- Add players using their Fortnite.GG sprite-page ID.
-- Fetch player names, sprite ownership, and mastered counts from Fortnite.GG.
-- Display ownership and mastery progress for every player.
-- Refresh one player or all players.
-- Select the players participating in a session.
-- Generate valid randomized exchange cycles.
-- Ensure each participating player gives at most one sprite and receives at most one sprite.
-- Maximize the number of participating players.
-- Display exchanges as responsive cards with sprite artwork and donor/receiver names.
-- Keep the player list and UI state in the browser through `localStorage`.
-- Provide separate **Players** and **Trades** tabs.
-- Cache fetched Fortnite.GG pages briefly in server memory to reduce repeated requests.
+### Player management
 
-## How it works
+- Add a player using the numeric ID from a Fortnite.GG URL such as:
 
-The browser never contacts Fortnite.GG directly. It calls the local FastAPI endpoint:
+  ```text
+  https://fortnite.gg/sprites?id=3908468
+  ```
+
+- Fetch the player name, official ownership counters, sprite statuses, and sprite images.
+- Refresh one player or refresh all players.
+- Select or deselect players for exchange generation.
+- Open the original Fortnite.GG page from each player card.
+- Display owned and mastered progress bars.
+- Keep the player list and interface state in the browser with `localStorage`.
+
+### Collection matrix
+
+The **Matrix** tab displays one row and one column per player.
+
+- A cell at row `A`, column `B` contains the number of sprites player A owns and player B is missing.
+- A diagonal cell contains the number of sprites owned by that player.
+- A cell displays `?` when one or both players do not have valid refreshed data.
+- Clicking a valid cell opens a sprite grid below the matrix.
+- A diagonal cell shows every sprite owned by that player.
+- An off-diagonal cell shows sprites owned by the row player and missing from the column player.
+- The sprite grid can be filtered between:
+  - **All**
+  - **Local only**
+
+The matrix and the selected sprite grid are recalculated whenever player data changes.
+
+### Exchange generation
+
+- Generate a randomized best partial exchange solution for selected players.
+- Each player gives at most one sprite.
+- Each player receives at most one sprite.
+- A player may only give, only receive, do both, or remain outside the solution.
+- Every proposed sprite is owned by the giver and missing from the receiver.
+- The algorithm maximizes the total number of valid transfers.
+- Equivalent maximum solutions are randomized, so repeated generations can produce different proposals.
+- Exchanges are displayed as responsive cards with:
+  - sprite image;
+  - sprite name;
+  - giver;
+  - receiver.
+
+### Local exchange confirmation
+
+Each exchange card has an **Exchanged** button.
+
+When pressed:
+
+- the receiver is marked as owning that sprite locally;
+- the player counters are updated;
+- the matrix is updated;
+- the selected matrix sprite grid is updated;
+- the local declaration is persisted in `localStorage`.
+
+A locally declared sprite remains owned after refreshing the player from Fortnite.GG when the source still reports it as missing.
+
+When Fortnite.GG later reports the sprite as owned or mastered, the local override is automatically removed because the source has become authoritative again.
+
+Sprites that are owned only through a local declaration display a **Local only** badge in the matrix sprite grid.
+
+## Application tabs
+
+The interface contains three tabs:
+
+1. **Players** — add, select, refresh, and remove players.
+2. **Matrix** — compare collections and inspect matching sprites.
+3. **Exchanges** — generate and confirm exchanges.
+
+The active tab is remembered in the browser.
+
+## Architecture
+
+The browser does not request Fortnite.GG directly. It calls the local FastAPI endpoint:
 
 ```text
 GET /api/player/{player_id}
 ```
 
-FastAPI then fetches the corresponding page:
+FastAPI then requests:
 
 ```text
 https://fortnite.gg/sprites?id={player_id}
 ```
 
-The backend parses the returned HTML and sends validated JSON to the interface. This avoids browser CORS restrictions.
+The server parses and validates the HTML before returning JSON to the interface. This avoids browser CORS restrictions.
 
-The application first tries `curl_cffi`, which can imitate a browser TLS fingerprint. If that fails and Playwright is installed, it falls back to a headless Chromium browser.
+The application uses `curl_cffi` to imitate a browser network fingerprint. An optional Playwright/Chromium fallback can be used when the direct fetch is rejected.
 
 ## Requirements
 
 - Python 3.10 or newer
-- Internet access from the machine running the server
+- Internet access from the server
 
-Recommended Python packages:
+Recommended dependencies:
 
 ```text
 fastapi
@@ -51,15 +112,17 @@ curl_cffi
 beautifulsoup4
 ```
 
-Optional fallback:
+Optional Chromium fallback:
 
 ```text
 playwright
 ```
 
+`httpx` is not required.
+
 ## Installation
 
-Create and activate a virtual environment.
+Create a virtual environment.
 
 ### Linux and macOS
 
@@ -75,7 +138,7 @@ py -m venv .venv
 .venv\Scripts\Activate.ps1
 ```
 
-Install the required dependencies:
+Install the required packages:
 
 ```bash
 pip install fastapi "uvicorn[standard]" curl_cffi beautifulsoup4
@@ -88,7 +151,7 @@ pip install playwright
 playwright install chromium
 ```
 
-On Linux servers, Chromium may also require system dependencies:
+On some Linux servers, Chromium also needs its system dependencies:
 
 ```bash
 playwright install --with-deps chromium
@@ -96,10 +159,10 @@ playwright install --with-deps chromium
 
 ## Run locally
 
-With the application file named `sprite_exchange_app_v8.py`:
+Place the application in a file named `app.py`, then run:
 
 ```bash
-python sprite_exchange_app_v8.py
+python app.py
 ```
 
 Open:
@@ -108,27 +171,31 @@ Open:
 http://127.0.0.1:8000
 ```
 
-You can also start it explicitly with Uvicorn:
+You can also launch it explicitly with Uvicorn:
 
 ```bash
-uvicorn sprite_exchange_app_v8:app --host 127.0.0.1 --port 8000
+uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
-## Deploy online
+The file uses this production-compatible entry point:
 
-For a hosted deployment, bind Uvicorn to `0.0.0.0` and use the port supplied by the hosting platform.
+```python
+if __name__ == "__main__":
+    import os
+    import uvicorn
 
-Example start command:
-
-```bash
-uvicorn sprite_exchange_app_v8:app --host 0.0.0.0 --port $PORT
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", "8000")),
+    )
 ```
 
-### Minimal repository structure
+## Minimal repository
 
 ```text
 sprite-exchange/
-├── sprite_exchange_app_v8.py
+├── app.py
 ├── requirements.txt
 └── README.md
 ```
@@ -142,53 +209,63 @@ curl_cffi
 beautifulsoup4
 ```
 
-Add Playwright only when the `curl_cffi` path is not sufficient:
+Add Playwright only when required:
 
 ```text
 playwright
 ```
 
-### Render
+## Deploy on Render
 
-Create a Web Service from the Git repository.
+Create a Render Web Service connected to the Git repository.
 
-Build command:
+### Build command
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Start command:
+### Start command
 
 ```bash
-uvicorn sprite_exchange_app_v8:app --host 0.0.0.0 --port $PORT
+uvicorn app:app --host 0.0.0.0 --port $PORT
 ```
 
-When Playwright is required, use a build command such as:
+Make sure `app.py` is at the repository root.
+
+A recent stable Python version such as Python 3.12 or 3.13 is recommended. It can be configured with a `.python-version` file:
+
+```text
+3.12
+```
+
+When Playwright is required, the build command can be extended to:
 
 ```bash
 pip install -r requirements.txt && playwright install --with-deps chromium
 ```
 
-### Railway
+Cloud hosting providers may use IP ranges that Fortnite.GG blocks. If local fetching works but the hosted deployment receives HTTP 403 responses, this may be an upstream datacenter-IP restriction rather than a FastAPI error.
 
-Deploy the Git repository and configure this start command:
+## Deploy on Railway
+
+Connect the repository and use:
 
 ```bash
-uvicorn sprite_exchange_app_v8:app --host 0.0.0.0 --port $PORT
+uvicorn app:app --host 0.0.0.0 --port $PORT
 ```
 
-Generate a public domain from the Railway networking settings.
+Generate a public domain in the Railway networking settings.
 
 ## API
 
 ### `GET /`
 
-Serves the complete web interface.
+Serves the complete application interface.
 
 ### `GET /api/player/{player_id}`
 
-Fetches and parses a Fortnite.GG player page.
+Fetches, parses, and validates a Fortnite.GG sprite page.
 
 Example:
 
@@ -196,15 +273,13 @@ Example:
 GET /api/player/3908468
 ```
 
-Optional query parameter:
+Use the optional `force=true` query parameter to bypass the short-lived in-memory cache:
 
 ```text
-force=true
+GET /api/player/3908468?force=true
 ```
 
-This bypasses the short-lived in-memory cache.
-
-Example response structure:
+Example response shape:
 
 ```json
 {
@@ -232,7 +307,7 @@ Example response structure:
 }
 ```
 
-Possible sprite statuses:
+Supported sprite statuses:
 
 ```text
 missing
@@ -241,99 +316,103 @@ mastered
 unreleased
 ```
 
-### `GET /health`
-
-Simple health check:
-
-```json
-{
-  "ok": true,
-  "cached_players": 2
-}
-```
-
-## Exchange algorithm
-
-The interface builds a directed compatibility graph:
-
-- an edge from player A to player B exists when A owns at least one sprite that B is missing;
-- each selected player can give at most one sprite;
-- each selected player can receive at most one sprite;
-- self-transfers are forbidden;
-- valid participating players form closed exchange cycles.
-
-The generator uses a maximum-assignment approach to maximize the number of participating players. Random tie-breaking is applied so repeated generations can produce different valid proposals when several equivalent solutions exist.
-
 ## Data persistence
 
-Player data is stored in the browser with `localStorage`.
+Most application state is stored in the browser through `localStorage`:
+
+- players;
+- selected players;
+- last generated result;
+- active tab;
+- locally confirmed ownership overrides.
 
 Consequences:
 
-- every browser has its own player list;
-- redeploying or restarting the server does not erase the browser list;
-- using another device or browser does not automatically share the same list;
-- clearing browser storage removes saved players and UI state.
+- each browser has its own data;
+- deploying a new server version does not normally erase browser data;
+- another device or browser will not automatically share the same state;
+- clearing browser site data removes players and local exchange confirmations.
 
-The FastAPI cache is only held in process memory and is cleared when the server restarts.
+The FastAPI response cache is held only in server memory and is lost when the process restarts.
+
+## Ownership source rules
+
+For each sprite, the effective ownership can come from either:
+
+1. Fortnite.GG;
+2. a local **Exchanged** confirmation.
+
+The merge behavior is:
+
+- remote `owned` or `mastered` always counts as source-confirmed ownership;
+- remote `missing` plus a local override counts as locally declared ownership;
+- after refresh, a local override is retained only while the remote source still says `missing`;
+- once the remote source confirms ownership, the override is removed automatically.
+
+This allows several games to be organized quickly even when Fortnite.GG has not yet synchronized the latest exchanges.
+
+## Exchange algorithm
+
+The current optimizer models players as potential givers and receivers in a bipartite graph.
+
+An edge from player A to player B exists when A owns at least one sprite that B is missing.
+
+A randomized maximum matching is computed so that:
+
+- each giver is used at most once;
+- each receiver is used at most once;
+- the number of transfers is maximized;
+- players are not required to form closed cycles;
+- a valid partial solution is returned even when not every selected player can participate.
+
+After player pairs are chosen, one compatible sprite is selected randomly for each transfer.
 
 ## Troubleshooting
 
-### Fortnite.GG returns `403 Forbidden`
+### `ModuleNotFoundError`
 
-Install and use `curl_cffi`:
+Install all dependencies from `requirements.txt` and verify that unused imports such as `httpx` are not left in `app.py`.
 
-```bash
-pip install curl_cffi
-```
+### Render cannot import `app`
 
-If the hosting provider's IP range is blocked, trying another provider may help. Datacenter IP filtering can differ between Render, Railway, Fly.io, and a self-hosted server.
+Confirm that:
 
-### The fallback Chromium browser is unavailable
+- the file is named `app.py`;
+- it is at the repository root;
+- it contains `app = FastAPI(...)`;
+- the start command is:
 
-Install Playwright and Chromium:
+  ```bash
+  uvicorn app:app --host 0.0.0.0 --port $PORT
+  ```
 
-```bash
-pip install playwright
-playwright install chromium
-```
+### Fortnite.GG returns HTTP 403
 
-For Linux servers:
+Confirm that `curl_cffi` is installed. If it still fails, install Playwright and Chromium. A cloud-provider IP may also be blocked upstream.
 
-```bash
-playwright install --with-deps chromium
-```
+### Player data looks stale
 
-### A player page is fetched but rejected as inconsistent
+Use the refresh button. The frontend requests a forced refresh when appropriate, and the backend supports `?force=true`.
 
-The parser validates the number of released sprites and the official ownership counters before accepting the response. Fortnite.GG markup can change over time, so a frontend change may require updating `_parse_player_html`.
+### Locally exchanged sprites remain after refresh
 
-### The application works locally but fails in production
+This is intentional while Fortnite.GG still reports them as missing. They disappear from the local-only list automatically once the remote source confirms ownership.
 
-Likely causes include:
+### Matrix displays `?`
 
-- the hosting provider's IP being blocked by Fortnite.GG;
-- missing `curl_cffi` or Playwright dependencies;
-- Chromium system libraries not being installed;
-- the server being started on `127.0.0.1` instead of `0.0.0.0`;
-- the hosting platform not passing the expected `$PORT` variable.
+At least one of the two players has not been refreshed successfully or does not have a valid sprite list.
 
-## Security and operational notes
+## Limitations
 
-- The player ID is validated before being used in an outbound request.
-- The backend only fetches the fixed Fortnite.GG sprite URL pattern.
-- No authentication is included.
-- No central database is included.
-- The in-memory cache is intentionally short-lived.
-- Do not expose development servers directly to the public internet without a production process manager or hosting platform.
-- Add rate limiting before opening the service to a large audience.
+- The parser depends on Fortnite.GG HTML and may require maintenance if the site changes.
+- Fortnite.GG can reject automated requests or cloud-hosting IP addresses.
+- Browser data is local to one browser profile.
+- Local exchange confirmations are not synchronized between users or devices.
+- There is no authentication or shared database.
+- The application is intended as a lightweight coordination tool, not as an authoritative inventory system.
 
-## Third-party service notice
+## License and attribution
 
-This project is not affiliated with, endorsed by, or sponsored by Epic Games or Fortnite.GG.
+Choose and add an appropriate license before distributing the project publicly.
 
-It depends on the current public HTML structure and availability of Fortnite.GG. That structure may change without notice, and automated access may be restricted. Review the site's applicable terms and avoid excessive request rates.
-
-## License
-
-No license is currently included. Add a `LICENSE` file before distributing or publishing the project if you want to define reuse permissions explicitly.
+Fortnite, Fortnite.GG, sprite names, and sprite artwork belong to their respective owners. This project is an independent utility and is not affiliated with or endorsed by Epic Games or Fortnite.GG.
